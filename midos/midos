@@ -1,0 +1,148 @@
+--- An operating system created by Midnightas, designed to be similar to Windows 10
+-- @module midos
+
+local util = {}
+util.screenW, util.screenH = term.getSize()
+
+--- Get directory of the file executed
+-- @return current directory
+util.getWorkingDirectory = function()
+	local runningProgram = shell.getRunningProgram()
+	local programName = fs.getName(runningProgram)
+	local result = runningProgram:sub(1, #runningProgram - #programName)
+	return #result == 0 and "/" or result
+end
+
+--- Split a string by a seperator
+-- @return the splitted string
+util.splitString = function(regex, string, times)
+	local tab = {}
+	local startt = 1
+	local positie, eindpos = string.find(string .. "", regex, startt)
+	if not times then
+		times = 0
+	end
+	local i = 1
+	while times == 0 or (positie and i <= times)  do
+		if not positie then
+			break
+		end
+		table.insert(tab, string.sub(string .. "", startt, positie - 1))
+		startt = eindpos + 1
+		positie, eindpos = string.find(string .. "", regex, startt)
+		i = i + 1
+	end
+	table.insert(tab, string.sub(string .. "", startt, -1))
+	return(tab)
+end
+
+local midos = {}
+
+midos.apps = {}
+midos.interfaces = {}
+midos.langs = {}
+midos.langs["en"] = "English"
+midos.lang = "en"
+midos.appsDir = util.getWorkingDirectory() .. "apps/"
+
+local interface = nil
+
+--- Register an application
+-- This is local as midinst automatically installs programs for you externally
+-- @param id The identification for midos to use when referencing this program
+-- @param name The name to be shown in menus, desktops, etc..
+midos.registerApp = function(id, name, filename)
+	if #name > 7 then error("App name cannot be bigger than 7 characters.") end
+	midos.apps[id] = {}
+	midos.apps[id].name = name
+	midos.apps[id].filename = filename or name .. ".midos"
+end
+
+--- Read a configuration in this format: key="value"
+-- @param content the config to read
+-- @return a key-value pair table containing the config settings
+midos.readConfig = function(content)
+	local result = {}
+	for k, line in pairs(util.splitString("\n", content)) do
+		local theLine = util.splitString("=", line, 1)
+		local key = theLine[1]
+		local value = theLine[2]
+		value = string.sub(value, 2, #value - 1)
+	end
+end
+
+--- Creates a table with button information. Used for MidOS interfaces
+-- @param x the x coordinate of the button
+-- @param y the y coordinate of the button
+-- @param w the width of the button
+-- @param h the height of the button
+-- @param fixed whether or not the button should move along with mouse scrolling
+-- @param onClick a function to run when this button is clicked. Function has one argument: the mouse button it is clicked with.
+-- @param draw a function to run when attempting to draw this button. No arguments.
+-- @return the new button
+midos.createInterfaceButton = function(x, y, w, h, fixed, onClick, draw)
+	local newButton = {}
+	newButton.x = x
+	newButton.y = y
+	newButton.w = w
+	newButton.h = h
+	newButton.fixed = fixed
+	newButton.onClick = onClick
+	newButton.draw = draw
+	return newButton
+end
+
+--- Create a new interface for MidOS
+-- @return the new interface
+midos.createInterface = function()
+	local newInterface = {}
+	newInterface.buttons = {}
+	newInterface.drawFunctions = {}
+	newInterface.addButton = function(button)
+		table.insert(newInterface.buttons, button)
+	end
+	newInterface.draw = function(func)
+		table.insert(newInterface.drawFunctions, func)
+	end
+	return newInterface
+end
+
+--- Draw everything
+midos.draw = function()
+	for k, v in pairs(interface.drawFunctions) do
+		v()
+	end
+end
+
+-- setup default interfaces to not reset them everytime they open
+
+midos.interfaces["desktop"] = midos.createInterface()
+midos.interfaces["desktop"].addButton(midos.createInterfaceButton(1, util.screenH, 1, 1, true, function(button)
+	interface = midos.interfaces["pusk"]
+end))
+midos.interfaces["desktop"].draw(function()
+	term.setBackgroundColor(colors.white)
+	term.setTextColor(colors.black)
+	term.clear()
+end)
+
+-- begin the os
+
+interface = midos.interfaces["desktop"]
+
+while true do
+	term.setBackgroundColor(colors.black)
+	term.setTextColor(colors.white)
+	term.clear()
+	midos.draw()
+	os.startTimer(0.5)
+	local event, arg1, arg2, arg3 = os.pullEvent()
+	if event == "mouse_click" then
+		for k, aButton in pairs(interface.buttons) do
+			if arg2 >= aButton.x and arg2 <= aButton.x + aButton.w - 1 and arg3 >= aButton.y and arg3 <= aButton.y + aButton.h - 1 then
+				aButton.onClick()
+				print(aButton)
+			end
+		end
+	end
+end
