@@ -36,6 +36,44 @@ util.splitString = function(regex, string, times)
 	return(tab)
 end
 
+function table.val_to_str ( v )
+	if "string" == type( v ) then
+		v = string.gsub( v, "\n", "\\n" )
+		if string.match( string.gsub(v,"[^'\"]",""), '^"+$' ) then
+			return "'" .. v .. "'"
+		end
+		return '"' .. string.gsub(v,'"', '\\"' ) .. '"'
+	else
+		return "table" == type( v ) and table.tostring( v ) or
+		tostring( v )
+	end
+end
+
+function table.key_to_str ( k )
+	if "string" == type( k ) and string.match( k, "^[_%a][_%a%d]*$" ) then
+		return k
+	else
+		return "[" .. table.val_to_str( k ) .. "]"
+	end
+end
+
+function table.tostring(tbl)
+	local result, done = {}, {}
+	for k, v in ipairs(tbl) do
+		table.insert(result, table.val_to_str(v))
+		done[k] = true
+	end
+	for k, v in pairs(tbl) do
+		if not v == "_class_" then
+		if not done[k] then
+		table.insert(result,
+			table.key_to_str(k) .. "=" .. table.val_to_str(v))
+		end
+		end
+	end
+	return tbl._class_ .. "{" .. table.concat( result, "," ) .. "}"
+end
+
 local midos = {}
 
 midos.apps = {}
@@ -78,10 +116,11 @@ end
 -- @param h the height of the button
 -- @param fixed whether or not the button should move along with mouse scrolling
 -- @param onClick a function to run when this button is clicked. Function has one argument: the mouse button it is clicked with.
--- @param draw a function to run when attempting to draw this button. No arguments.
+-- @param draw a function to run when attempting to draw this button. Arguments: x y
 -- @return the new button
 midos.createInterfaceButton = function(x, y, w, h, fixed, onClick, draw)
 	local newButton = {}
+	newButton._class_ = "Button"
 	newButton.x = x
 	newButton.y = y
 	newButton.w = w
@@ -93,11 +132,21 @@ midos.createInterfaceButton = function(x, y, w, h, fixed, onClick, draw)
 end
 
 --- Create a new interface for MidOS
+-- @param bg the background color of the interface
+-- @param fg the foreground color of the interface
+-- @param scrollable whether the mouse scroller should move the objects in the interface
+-- @param maxScrollAmount max amount of scroll's' for the interface
 -- @return the new interface
-midos.createInterface = function()
+midos.createInterface = function(bg, fg, scrollable, maxScrollAmount)
 	local newInterface = {}
+	newInterface._class_ = "Interface"
 	newInterface.buttons = {}
 	newInterface.drawFunctions = {}
+	newInterface.bg = bg
+	newInterface.fg = fg
+	newInterface.scrollable = scrollable
+	newInterface.maxScrollAmount = maxScrollAmount
+	newInterface.scrolled = 0
 	newInterface.addButton = function(button)
 		table.insert(newInterface.buttons, button)
 	end
@@ -107,26 +156,83 @@ midos.createInterface = function()
 	return newInterface
 end
 
+--- Creates a function for drawing simple text buttons
+-- @param text the text in the button
+-- @param bg The background of the button. Can be nil
+-- @param fg The foreground of the button. Can be nil
+-- @return the new button draw function
+midos.createTextButtonDraw = function(text, bg, fg)
+	return function(x, y)
+		if bg ~= nil then term.setBackgroundColor(bg) end
+		if fg ~= nil then term.setTextColor(fg) end
+		write(text)
+	end
+end
+
 --- Draw everything
 midos.draw = function()
+	term.setBackgroundColor(interface.bg)
+	term.setTextColor(interface.fg)
+	term.clear()
 	for k, v in pairs(interface.drawFunctions) do
 		v()
+	end
+	for k, v in pairs(interface.buttons) do
+		if v.draw ~= nil then
+			term.setCursorPos(v.x, v.y)
+			v.draw(v.x, v.y)
+		end
 	end
 end
 
 -- setup default interfaces to not reset them everytime they open
 
-midos.interfaces["desktop"] = midos.createInterface()
+local loadedApps = {}
+for _, v in pairs(fs.list(midos.appsDir)) do
+	local appLoc = midos.appsDir .. v
+	if not fs.isDir(appLoc) then
+		local bytecode = fs.open(appLoc, "rb")
+		local stack = {}
+		stack._class_ = "MidOSStack"
+		while true do
+			local b = bytecode.read()
+			if b == nil then break end
+			if b == 0x00 then table.insert(stack, 0) end
+			if b == 0x01 then table.insert(stack, 1) end
+			if b == 0x02 then table.insert(stack, 2) end
+			if b == 0x03 then table.insert(stack, 3) end
+			if b == 0x04 then table.insert(stack, 4) end
+			if b == 0x05 then table.insert(stack, 5) end
+			if b == 0x06 then table.insert(stack, 6) end
+			if b == 0x07 then table.insert(stack, 7) end
+			if b == 0x08 then table.insert(stack, 8) end
+			if b == 0x09 then table.insert(stack, 9) end
+		end
+		print(table.tostring(stack))
+	end
+end
+
+midos.interfaces["pusk"] = midos.createInterface(colors.white, colors.black, true)
+midos.interfaces["pusk"].addButton(midos.createInterfaceButton(1, util.screenH, 1, 1, true, function(button)
+end, function(x, y)
+end))
+midos.interfaces["pusk"].draw(function()
+end)
+
+loadedApps = {}
+
+midos.interfaces["desktop"] = midos.createInterface(colors.white, colors.black, false)
 midos.interfaces["desktop"].addButton(midos.createInterfaceButton(1, util.screenH, 1, 1, true, function(button)
 	interface = midos.interfaces["pusk"]
-end))
+end, midos.createTextButtonDraw("O", colors.lightGray, colors.black)))
 midos.interfaces["desktop"].draw(function()
-	term.setBackgroundColor(colors.white)
-	term.setTextColor(colors.black)
-	term.clear()
+	term.setCursorPos(util.screenW - 4, util.screenH)
+	write(textutils.formatTime(os.time(), true))
 end)
 
 -- begin the os
+
+error("")
 
 interface = midos.interfaces["desktop"]
 
@@ -135,7 +241,7 @@ while true do
 	term.setTextColor(colors.white)
 	term.clear()
 	midos.draw()
-	os.startTimer(0.5)
+	os.startTimer(0.25)
 	local event, arg1, arg2, arg3 = os.pullEvent()
 	if event == "mouse_click" then
 		for k, aButton in pairs(interface.buttons) do
