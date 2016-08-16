@@ -1,4 +1,4 @@
-# Midos
+# ![Midos Small Logo](http://i.imgur.com/XCTcLPR.png)
 Midos is a Win10-like operating system for ComputerCraft computers.  
 
 ## .midos File Format
