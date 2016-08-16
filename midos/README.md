@@ -83,7 +83,7 @@ Midos supports strings containing bytes only from 0 to 255 (ASCII).
 `19` requires an item in the stack: The length of the string.
 After `19` you must put the bytes that construct the string.
 
-    `02 19 68 69`
+    02 19 68 69
 Try to guess the correct answer.
 <details>
   <summary>Click on the arrow beside this text to see the correct answer.</summary>
