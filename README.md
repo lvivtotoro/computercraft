@@ -1,2 +1,1 @@
-# computercraft
-All of my ComputerCraft programs
+## Each project has it's own README.md!
