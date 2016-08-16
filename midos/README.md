@@ -2,6 +2,9 @@
 Midos is a Win10-like operating system for ComputerCraft computers.  
 
 ## .midos File Format
+Midos does not run Lua programs like most systems do.  
+It has it's own file format which acts like an executable file.
+
 The Midos file format is simple, yet hard to remember as there will be at least 254 commands.  
 (254 because if there will be more than 255, I need to create a complex command that uses 2 bytes.)  
 (Same goes for 65535, but there probably wont be that many commands.)  
