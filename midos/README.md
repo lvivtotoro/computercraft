@@ -89,3 +89,6 @@ Try to guess the correct answer.
   <summary>Click on the arrow beside this text to see the correct answer.</summary>
   hi
 </details>
+
+# Bonus
+![some conversation i had](https://snag.gy/S7rHbd.jpg)
