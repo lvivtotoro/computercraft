@@ -1,6 +1,8 @@
 --- An operating system created by Midnightas, designed to be similar to Windows 10
 -- @module midos
 
+args = {...}
+
 local util = {}
 util.screenW, util.screenH = term.getSize()
 
@@ -36,64 +38,52 @@ util.splitString = function(regex, string, times)
 	return(tab)
 end
 
-function table.val_to_str ( v )
-	if "string" == type( v ) then
-		v = string.gsub( v, "\n", "\\n" )
-		if string.match( string.gsub(v,"[^'\"]",""), '^"+$' ) then
-			return "'" .. v .. "'"
-		end
-		return '"' .. string.gsub(v,'"', '\\"' ) .. '"'
-	else
-		return "table" == type( v ) and table.tostring( v ) or
-		tostring( v )
-	end
+--- Write horizontally centered text
+-- @param text The text to print
+-- @param y The Y coordinate
+util.printCenter = function(text, y)
+	w, h = term.getSize()
+	term.setCursorPos(math.floor(w - #text) / 2, y)
+	write(text)
 end
 
-function table.key_to_str ( k )
-	if "string" == type( k ) and string.match( k, "^[_%a][_%a%d]*$" ) then
-		return k
-	else
-		return "[" .. table.val_to_str( k ) .. "]"
-	end
-end
-
-function table.tostring(tbl)
-	local result, done = {}, {}
-	for k, v in ipairs(tbl) do
-		table.insert(result, table.val_to_str(v))
-		done[k] = true
-	end
-	for k, v in pairs(tbl) do
-		if not v == "_class_" then
-		if not done[k] then
-		table.insert(result,
-			table.key_to_str(k) .. "=" .. table.val_to_str(v))
-		end
-		end
-	end
-	return tbl._class_ .. "{" .. table.concat( result, "," ) .. "}"
-end
-
+--- The whole thing
 local midos = {}
 
+--- All registered apps
 midos.apps = {}
+--- For making sure midos files would be compatible
+midos.majorVersion = 0x00
+--- It's like windows
 midos.interfaces = {}
+--- Supported languages, will probably only have English until more alphabets are supported by ComputerCraft
 midos.langs = {}
 midos.langs["en"] = "English"
 midos.lang = "en"
+--- The apps directory in the filesystem
 midos.appsDir = util.getWorkingDirectory() .. "apps/"
+--- What byte corresponds to what color in midos files
+midos.colors = {[0x00]=colors.white,[0x01]=colors.orange,[0x02]=colors.magenta,[0x03]=colors.lightBlue,[0x04]=colors.yellow,[0x05]=colors.lime,[0x06]=colors.pink,[0x07]=colors.gray,[0x08]=colors.lightGray,[0x09]=colors.cyan,[0x0A]=colors.purple,[0x0B]=colors.blue,[0x0C]=colors.brown,[0x0D]=colors.green,[0x0E]=colors.red,[0x0F]=colors.black}
+--- If any one decides to create a midos bytecode viewer.
+midos.bytecodeText = {
+	[0x00]="push0",[0x01]="push1",[0x02]="push2",[0x03]="push3",[0x04]="push4",[0x05]="push5",[0x06]="push6",[0x07]="push7",[0x08]="push8",[0x09]="push9",
+	[0x0A]="sum",[0x0B]="diff",[0x0C]="prod",[0x0D]="quotient",[0x0E]="exp",[0x0F]="sqrt",[0x10]="varpush",[0x11]="varpeek",[0x12]="pop",[0x13]="codeblockstart",
+	[0x14]="codeblockend",[0x15]="codeblockrun",[0x16]="swap",[0x17]="arraystart",[0x18]="arrayend",[0x19]="string"}
+--- A list of midos.interface's' that are shown in the taskbar.
+midos.windows = {}
 
 local interface = nil
 
 --- Register an application
--- This is local as midinst automatically installs programs for you externally
--- @param id The identification for midos to use when referencing this program
 -- @param name The name to be shown in menus, desktops, etc..
+-- @param filename the name of the program in the apps directory (if nil, it would use the name argument + ".midos")
+-- @return the identification of the program.
 midos.registerApp = function(id, name, filename)
-	if #name > 7 then error("App name cannot be bigger than 7 characters.") end
-	midos.apps[id] = {}
-	midos.apps[id].name = name
-	midos.apps[id].filename = filename or name .. ".midos"
+	local newApp = {}
+	newApp.name = name
+	newApp.filename = filename or name .. ".midos"
+	table.insert(midos.apps, newApp)
+	return #midos.apps
 end
 
 --- Read a configuration in this format: key="value"
@@ -169,6 +159,168 @@ midos.createTextButtonDraw = function(text, bg, fg)
 	end
 end
 
+--- Begin interpreting the .midos file format
+-- @param bytecode A table-array containing the bytes
+-- @param stack A stack with predefined values, leave empty if there are no predefined values
+-- @param vars A key-value pair table containing any predefined variables
+midos.interpret = function(bytecode, stack, vars)
+	stack._class_ = "MidOSStack"
+	vars._class_ = "MidOSStackVars"
+	local arrays = {}
+	local majorVersion = bytecode[1]
+	if majorVersion ~= midos.majorVersion then
+		midos.errorWindow("Incompatible major version: " .. tostring(majorVersion))
+		return
+	end
+	table.remove(bytecode, 1)
+	stack.insert = function(thing)
+		if #arrays == 0 then table.insert(stack, thing)
+		else table.insert(arrays[#arrays], thing) end
+	end
+	stack.peek = function(offset)
+		offset = offset or 0
+		if #arrays > 0 then return arrays[#arrays][#arrays[#arrays]] --[[ accidental magic, f***ked up rage before that --]] else
+		return stack[#stack] end
+	end
+	stack.delete = function(offset)
+		offset = offset or 0
+		if #arrays > 0 then
+			local thing = arrays[#arrays][#arrays[#arrays]] --[[ still using magic --]]
+			table.remove(arrays[#arrays])
+			return thing
+		else
+			local thing = stack[#stack]
+			table.remove(stack)
+			return thing
+		end
+	end
+	
+	local bi = 0
+	while true do
+		bi = bi + 1
+		if bi > #bytecode then break end
+
+		local b = bytecode[bi]
+		if b == nil then break
+		elseif b == 0x00 then stack.insert(0)
+		elseif b == 0x01 then stack.insert(1)
+		elseif b == 0x02 then stack.insert(2)
+		elseif b == 0x03 then stack.insert(3)
+		elseif b == 0x04 then stack.insert(4)
+		elseif b == 0x05 then stack.insert(5)
+		elseif b == 0x06 then stack.insert(6)
+		elseif b == 0x07 then stack.insert(7)
+		elseif b == 0x08 then stack.insert(8)
+		elseif b == 0x09 then stack.insert(9)
+		elseif b == 0x0A then
+			local b = stack[#stack]
+			local a = stack[#stack - 1]
+			stack.delete()
+			stack.delete()
+			if type(a) == "string" or type(b) == "string" then
+				stack.insert(tostring(a) .. tostring(b))
+			else
+				stack.insert(a + b)
+			end
+		elseif b == 0x0B then
+			local b = stack[#stack]
+			local a = stack[#stack - 1]
+			stack.delete()
+			stack.delete()
+			stack.insert(a - b)
+		elseif b == 0x0C then
+			local b = stack[#stack]
+			local a = stack[#stack - 1]
+			stack.delete()
+			stack.delete()
+			stack.insert(a * b)
+		elseif b == 0x0D then
+			local b = stack[#stack]
+			local a = stack[#stack - 1]
+			stack.delete()
+			stack.delete()
+			stack.insert(a / b)
+		elseif b == 0x0E then
+			local b = stack[#stack]
+			local a = stack[#stack - 1]
+			stack.delete()
+			stack.delete()
+			stack.insert(a ^ b)
+		elseif b == 0x0F then
+			local a = stack[#stack]
+			stack.delete()
+			stack.insert(math.sqrt(a))
+		elseif b == 0x10 then
+			local val = stack[#stack]
+			local var = bytecode[bi + 1] .. "" .. bytecode[bi + 2]
+			bi = bi + 2
+			stack.delete()
+			vars[var] = val
+		elseif b == 0x11 then
+			local var = bytecode[bi + 1] .. "" .. bytecode[bi + 2]
+			bi = bi + 2
+			stack.insert(vars[var])
+		elseif b == 0x12 then
+			stack.delete()
+		elseif b == 0x13 then
+			local newCodeBlock = {}
+			newCodeBlock.bytes = {}
+			local depth = 0
+			for bi0=bi+1,#bytecode do
+				local wowByte = bytecode[bi0]
+				table.insert(newCodeBlock.bytes, wowByte)
+				if wowByte == 0x13 then depth = depth + 1 end
+				if wowByte == 0x14 then
+					depth = depth - 1
+					if depth == -1 then
+						bi = bi0
+						break
+					end
+				end
+			end
+			newCodeBlock.run = function(theStack, theVars)
+				midos.interpret(newCodeBlock.bytes, theStack, theVars)
+			end
+			table.remove(newCodeBlock.bytes)
+			newCodeBlock._class_ = "MidOSCodeBlock"
+			stack.insert(newCodeBlock)
+		elseif b == 0x15 then
+			local theFunc = stack[#stack]
+			stack.delete()
+			theFunc.run()
+		elseif b == 0x16 then
+			local a = stack[#stack - 1]
+			local b = stack[#stack]
+			stack.delete()
+			stack.delete()
+			stack.insert(b)
+			stack.insert(a)
+		elseif b == 0x17 then
+			table.insert(arrays, {})
+		elseif b == 0x18 then
+			table.insert(stack, arrays[#arrays])
+			table.remove(arrays)
+		elseif b == 0x19 then
+			local stringLen = stack.delete()
+			local newString = ""
+			for bi0=bi+1,bi+stringLen do
+				newString = newString .. string.char(bytecode[bi0])
+			end
+			bi = bi+stringLen
+			stack.insert(newString)
+		end
+	end
+end
+
+--- Create an error interface
+-- @param message the message to display
+midos.errorWindow = function(message)
+	local newError = midos.createInterface(colors.red, colors.black, false)
+	newError.draw(function(scrolled)
+		util.printCenter("ERROR: " .. message, util.screenH / 2)
+	end)
+end
+
 --- Draw everything
 midos.draw = function()
 	term.setBackgroundColor(interface.bg)
@@ -185,54 +337,71 @@ midos.draw = function()
 	end
 end
 
+--[[ os load --]]
+
+if #args > 0 and args[1] == "$-|XthehelpsX|-$" then
+	term.setBackgroundColor(colors.black)
+	term.setTextColor(colors.white)
+	term.clear()
+	term.setCursorPos(1, 2)
+	util.printCenter("THE HELPS", 2)
+	term.setCursorPos(1, 3)
+	for i=1,util.screenW do write("-") end
+	term.setCursorPos(1, 4)
+	print("[Sprattus] Midnightas - For doing most of the schaisse.\n")
+	print("KingofGamesYami\n")
+	error()
+end
+
 -- setup default interfaces to not reset them everytime they open
 
-local loadedApps = {}
+term.clear()
+term.setCursorPos(1, 1)
+
 for _, v in pairs(fs.list(midos.appsDir)) do
+	term.setTextColor(colors.white)
 	local appLoc = midos.appsDir .. v
+	write("Attempting to register program " .. v)
+	local loadedApp = {}
 	if not fs.isDir(appLoc) then
 		local bytecode = fs.open(appLoc, "rb")
-		local stack = {}
-		stack._class_ = "MidOSStack"
+		loadedApp.stack = {}
+		loadedApp.vars = {}
+		loadedApp.bytecodeArray = {}
 		while true do
 			local b = bytecode.read()
 			if b == nil then break end
-			if b == 0x00 then table.insert(stack, 0) end
-			if b == 0x01 then table.insert(stack, 1) end
-			if b == 0x02 then table.insert(stack, 2) end
-			if b == 0x03 then table.insert(stack, 3) end
-			if b == 0x04 then table.insert(stack, 4) end
-			if b == 0x05 then table.insert(stack, 5) end
-			if b == 0x06 then table.insert(stack, 6) end
-			if b == 0x07 then table.insert(stack, 7) end
-			if b == 0x08 then table.insert(stack, 8) end
-			if b == 0x09 then table.insert(stack, 9) end
+			table.insert(loadedApp.bytecodeArray, b)
 		end
-		print(table.tostring(stack))
+		bytecode.close()
+		term.setTextColor(colors.white)
+		write(" .. ")
+		term.setTextColor(colors.green)
+		print("OK")
 	end
+	table.insert(midos.loadedApps, loadedApp)
 end
 
-midos.interfaces["pusk"] = midos.createInterface(colors.white, colors.black, true)
-midos.interfaces["pusk"].addButton(midos.createInterfaceButton(1, util.screenH, 1, 1, true, function(button)
-end, function(x, y)
-end))
+midos.interfaces["pusk"] = midos.createInterface(colors.white, colors.black, false)
+local lolASDFy = 2
+for k, v in pairs(midos.loadedApps) do
+	midos.interfaces["pusk"].addButton(midos.createInterfaceButton(1, lolASDFy, 1, 1, true, function(button)
+		
+	end, midos.createTextButtonDraw("O", colors.lightGray, colors.black)))
+	lolASDFy = lolASDFy + 1
+end
+lolASDFy = nil
 midos.interfaces["pusk"].draw(function()
 end)
-
-loadedApps = {}
 
 midos.interfaces["desktop"] = midos.createInterface(colors.white, colors.black, false)
 midos.interfaces["desktop"].addButton(midos.createInterfaceButton(1, util.screenH, 1, 1, true, function(button)
 	interface = midos.interfaces["pusk"]
 end, midos.createTextButtonDraw("O", colors.lightGray, colors.black)))
 midos.interfaces["desktop"].draw(function()
-	term.setCursorPos(util.screenW - 4, util.screenH)
-	write(textutils.formatTime(os.time(), true))
 end)
 
 -- begin the os
-
-error("")
 
 interface = midos.interfaces["desktop"]
 
